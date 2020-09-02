@@ -2,16 +2,47 @@
 #include <unistd.h>
 #include <string.h>
 #include <mcheck.h>
+#include <sys/stat.h>
 #include <json-c/json.h>
 
-#define READ_FILE_BUF 256
+#define READ_FILE_BUF 1024
 #define ONE_LOAD 15
-#define READ_FILE_PATH "test.txt"
+#define READ_FILE "test.txt"
 
-#define KEY_CHECK_FILE "success"
-#define KEY_TEST "district";
+#define KEY_CHECK_KEY "success"
+#define KEY_RESULT_OBJ "result"
+#define KEY_FIELDS_OBJ "fields"
+#define KEY_RECORD_OBJ "records"
 
-struct json_object *find_target(struct json_object *jobj, const char *key)
+#define KEY_RECORD_KEY_SITE_ID "SiteId"
+#define KEY_RECORD_KEY_SITE_NAME "SiteName"
+#define KEY_RECORD_KEY_COUNTRY "County"
+#define KEY_RECORD_KEY_ITEM_ID "ItemId"
+#define KEY_RECORD_KEY_ITEM_NAME "ItemName"
+#define KEY_RECORD_KEY_ITEM_ENGNAME "ItemEngName"
+#define KEY_RECORD_KEY_ITEM_UNIT "ItemUnit"
+#define KEY_RECORD_KEY_MON_DATA "MonitorDate"
+#define KEY_RECORD_KEY_CONCENT "Concentration"
+
+long int file_size(FILE *fp)
+{
+	long size;
+
+	fseek(fp, 0, SEEK_END);
+
+    /*Get the current position of the file pointer.*/
+    size = ftell(fp);
+
+    if (size != -1) {
+		fseek(fp, 0, SEEK_SET);
+        return size;
+	}
+
+    printf("open file err\n");
+    return size;
+}
+
+struct json_object *find_obj(struct json_object *jobj, const char *key)
 {
 	struct json_object *tmp;
 
@@ -19,58 +50,61 @@ struct json_object *find_target(struct json_object *jobj, const char *key)
 	return tmp;
 }
 
+int find_key_str_val(struct json_object *jobj,
+	const char *key, char *val_str)
+{
+	json_object *tmp_obj;
+	const char *tmp_str;
+
+	tmp_obj = find_obj(jobj, key);
+	if (!tmp_obj) {
+		fprintf(stderr, "can't find target key name %s\n", key);
+		return -1;
+	}
+
+	tmp_str = json_object_get_string(tmp_obj);
+	if (!tmp_str) {
+		fprintf(stderr, "can't find target keyname in the file\n");
+		return -1;
+	}
+
+	strcpy(val_str, tmp_str);
+	/* fprintf(stdout, "str=%s\n", val_str); */
+
+	return 0;
+}
+
+
 int test(char *dist)
 {
     FILE *fp = NULL;
-    char buf[READ_FILE_BUF] = {0};
-    char str[ONE_LOAD];
+    char *read_jason_buf;
     const char *test_my_str;
-    char *tname = KEY_TEST;
-    char *key_name = KEY_CHECK_FILE;
-    const char *gstr = NULL; //get string
+    char str_val[30];
+	char *val_type_str, *type_str;
+    long json_file_sz;
+	int val_type, arraylen, i, ret;
+
 	json_object *jobj;
-	json_object *val_obj = NULL;
+	json_object *result_obj;
+	json_object *fields_obj;
+	json_object *array_obj;
+	json_object *engname_obj, *sitname_obj;
 
-
-/*
-	char *str_test = "{ \"msg-type\": [ \"0xdeadbeef\", \"irc log\" ], \
-		\"msg-from\": { \"class\": \"soldier\", \"name\": \"Wixilav\" }, \
-		\"msg-to\": { \"class\": \"supreme-commander\", \"name\": \"[Redacted]\" }, \
-		\"msg-log\": [ \
-			\"soldier: Boss there is a slight problem with the piece offering to humans\", \
-			\"supreme-commander: Explain yourself soldier!\", \
-			\"soldier: Well they don't seem to move anymore...\", \
-			\"supreme-commander: Oh snap, I came here to see them twerk!\" \
-			] \
-		}";
-*/
-
-    if ((fp = fopen (READ_FILE_PATH, "r")) == NULL) {
+    if ((fp = fopen (READ_FILE, "r")) == NULL) {
         fprintf(stderr, "Can't open file\n");
         return 1;
     }
 
-	fread(buf, 30, 1, fp);
-	fprintf(stdout, "buf=%s\n",buf);
+	json_file_sz = file_size(fp);
+	read_jason_buf = malloc(sizeof(char) * json_file_sz);
+	fread(read_jason_buf, json_file_sz, 1, fp);
+	/* fprintf(stdout, "read_jason_buf=%s\n",buf); */
 
-//    while (!feof(fp) && !ferror(fp)) {
-//        if (strlen(buf) > READ_FILE_BUF - ONE_LOAD) {
-//            fprintf(stdout, "buf oversize\n");
-//            goto end;
-//        }
-//
-//        if (fgets(str, ONE_LOAD, fp) != NULL) {
-//            str[strlen(str) - 1] = 0x20;
-//            strncat(buf, str, ONE_LOAD);
-//            fprintf(stdout, "buf=%s\n", buf);
-//        }
-//    }
-
-
-
-    jobj = json_tokener_parse(buf);
+    jobj = json_tokener_parse(read_jason_buf);
     if (!jobj) {
-		test_my_str = json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_SPACED | JSON_C_TO_STRING_PRETTY);
+		test_my_str = json_object_to_json_string_ext(jobj,
+			JSON_C_TO_STRING_SPACED | JSON_C_TO_STRING_PRETTY);
 		if (!test_my_str) {
 			fprintf(stderr, "json_tokener_parse fail\n");
 			goto end;
@@ -78,62 +112,65 @@ int test(char *dist)
 		printf("jobj from str:\n---\n%s\n---\n", test_my_str);
 		jobj = json_tokener_parse(test_my_str);
 	} else {
-	    jobj = json_tokener_parse(buf);
+	    jobj = json_tokener_parse(read_jason_buf);
 	    if (!jobj) {
 			fprintf(stderr, "json_tokener_parse fail\n");
 	        goto end;
 		}
 	}
 
-#if 1
-	val_obj = find_target(jobj, key_name);
-	if (!val_obj) {
-		fprintf(stderr, "Can't find target keyname %s\n", key_name);
-		return 1;
-	}
-#else
-	val_obj = find_target(jobj, tname);
-	if (!val_obj) {
-		fprintf(stderr, "Can't find target keyname %s\n", tname);
-		return 1;
-	}
-#endif
-
-	gstr = json_object_get_string(val_obj);
-	if (!gstr) {
-		fprintf(stderr, "Can't find target keyname in the file\n");
+	/* 
+	 * make sure json file correct
+	 */
+	ret = find_key_str_val(jobj, KEY_CHECK_KEY, str_val);
+	if (ret < 0) {
+		printf("find_key_str_val fail");
 		return 1;
 	}
 
-	strcpy(dist, gstr);
+	if (strcmp(str_val, "true") != 0) {
+		printf("json file format fail (%s)\n", str_val);
+		return 1;
+	}
+	fprintf(stdout, "str=%s\n", str_val);
 
-    json_object_put(jobj);
-    fprintf(stdout, "dist=%s\n", dist);
-
-
-/*
-	val_obj = find_target(jobj, tname);
-	if (!val_obj) {
-		fprintf(stderr, "Can't find target keyname %s\n", tname);
+	/*
+	 * get array value from json file
+	 */
+	result_obj = find_obj(jobj, KEY_RESULT_OBJ);
+	if (!result_obj) {
+		fprintf(stderr, "can't find key %s\n", KEY_RESULT_OBJ);
 		return 1;
 	}
 
-	gstr = json_object_get_string(val_obj);
-	if (!gstr) {
-		fprintf(stderr, "Can't find target keyname in the file\n");
+	fields_obj = find_obj(result_obj, KEY_RECORD_OBJ);
+	if (!fields_obj) {
+		fprintf(stderr, "can't find key %s\n", KEY_RECORD_OBJ);
 		return 1;
 	}
 
-	strcpy(dist, gstr);
+	arraylen = json_object_array_length(fields_obj);
+	printf("arraylen %d\n", arraylen);
 
-    json_object_put(jobj);
-    fprintf(stdout, "dist=%s\n", dist);
-*/
+	for (i = 0; i < arraylen; i++) {
+		array_obj = json_object_array_get_idx(fields_obj, i);
 
+		engname_obj = find_obj(array_obj, KEY_RECORD_KEY_ITEM_ENGNAME);
+		sitname_obj = find_obj(array_obj, KEY_RECORD_KEY_SITE_NAME);
+
+		/* print out the name attribute */
+		printf("sitname=%s\n", json_object_get_string(sitname_obj));
+		printf("engname=%s\n", json_object_get_string(engname_obj));
+	}
+
+	/* cloase file */
+	free(read_jason_buf);
+	json_object_put(jobj);
     fclose(fp);
     return 0;
 
 end:
+	free(read_jason_buf);
     json_object_put(jobj);
     fclose(fp);
 }
